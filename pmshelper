@@ -1,0 +1,43 @@
+#!/bin/bash
+
+usage(){
+    echo ""
+    echo "    usage: pmshelper <log_file> <pcap_file>"
+    echo ""
+}
+filetype() {
+    echo ""
+    echo "    ${pcapfile} is not a tcpdump file?"
+    echo ""
+}
+
+logfile=$1
+pcapfile=$2
+if [ $# -lt 2 ]; then
+  usage;
+  exit;
+fi
+if [[ $(file --mime-type -b $2) != *tcpdump* ]]; then filetype; exit; fi
+
+tshark -E separator=" " -nnnr $2 -Y 'ssl.handshake.type == 1' -T fields -e ip.src -e tcp.srcport  -e ssl.handshake.random | sed 's/://g' >
+/var/tmp/random.pcap
+
+### Format like this:
+### 192.168.2.1 6058 7cae20e34232a4d4396c208da7e559f0e46780e6adffe92c13b1ebbb6ed3e05c
+### 192.168.2.1 6059 236736c67976029c7107c8969678bad071d83c74a647cbd50b09cb1f3757e989
+### 192.168.2.1 6060 91913116407249316075b3416a5e1d15b65359bc5e2b0f82b52b3c306c8bcfc9
+### 192.168.2.1 6061 432c86f0fadc0400aba002dce7fd3fbf7ceb164b85bd76ddd4383e15d9e1d089
+
+### Log file like this:
+
+### Jan 19 12:36:12 bigip1 info tmm1[12159]: Rule /Common/ssl_decry_random <CLIENTSSL_HANDSHAKE>: 192.168.2.1 6058 Master-Key:ee6e52840bd717628569ffc34a109a14953d439ad8b17245f7c833cf94dac1ea1dfa348a2b1cda1b6d9c3992fc9e8e9b 192.168.2.1 6058 7cae20e34232a4d4396c208da7e559f0e46780e6adffe92c13b1ebbb6ed3e05c
+### Jan 19 12:36:15 bigip1 info tmm1[12159]: Rule /Common/ssl_decry_random <CLIENTSSL_HANDSHAKE>: 192.168.2.1 6059 Master-Key:14544d13c5d1c997a5a3c04813ffc7b85427200da0a25877d0819ad488b66a7fa2bdaa6347b25637fbadba5c5aa60f88 192.168.2.1 6059 236736c67976029c7107c8969678bad071d83c74a647cbd50b09cb1f3757e989
+
+
+while read l; do
+    x1=`echo $l | awk '{print $10 " " $11}' | xargs -i egrep {} /var/tmp/random.pcap`
+    if [[ -n $x1 ]]; then
+        echo $x1 $l  | awk '{print "CLIENT_RANDOM " $3,$15}' | sed 's/Master-Key://g'
+    fi
+done < ${logfile}
+rm -f /var/tmp/random.pcap
